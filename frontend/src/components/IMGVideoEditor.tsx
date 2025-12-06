@@ -232,12 +232,22 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
           // Append early to ensure block is known in timeline context
           engine.block.appendChild(trackId, graphic);
           
+          // CRITICAL: Set explicit dimensions FIRST to ensure 16:9 landscape format
+          // This prevents vertical orientation issues
+          try {
+            engine.block.setWidth(graphic, pageWidth);
+            engine.block.setHeight(graphic, pageHeight);
+            console.log('[IMGVideoEditor] Graphic dimensions set:', { width: pageWidth, height: pageHeight });
+          } catch {}
+          
           // Create image fill
           const imageFill = engine.block.createFill('image');
           engine.block.setString(imageFill, 'fill/image/imageFileURI', asset.imageUrl);
           
-          // CRITICAL: Use fillParent BEFORE setFill to ensure proper 16:9 landscape scaling
-          // This ensures graphic fills the track which fills the page (1920x1080)
+          // Set fill
+          engine.block.setFill(graphic, imageFill);
+          
+          // Use fillParent to ensure graphic fills the track (16:9 landscape)
           engine.block.fillParent(graphic);
           
           // Set content fill mode to 'cover' to maintain aspect ratio
@@ -245,8 +255,16 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
             engine.block.setEnum(graphic, 'contentFill/mode', 'cover');
           } catch {}
           
-          // Set fill after fillParent (same order as main project)
-          engine.block.setFill(graphic, imageFill);
+          // Verify final dimensions
+          const finalWidth = engine.block.getWidth(graphic);
+          const finalHeight = engine.block.getHeight(graphic);
+          const finalAspectRatio = finalWidth && finalHeight ? (finalWidth / finalHeight).toFixed(2) : 'N/A';
+          console.log('[IMGVideoEditor] Graphic final dimensions:', {
+            width: finalWidth,
+            height: finalHeight,
+            aspectRatio: finalAspectRatio,
+            expected: '16:9 (1.78)'
+          });
           
           // Set duration and time offset
           engine.block.setDuration(graphic, durationPerImage);
