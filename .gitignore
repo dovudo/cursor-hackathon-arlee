@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+*.log
+
+# Next.js
+.next/
+out/
+build/
+
+# Production
+dist/
+*.pem
+
+# Misc
+.DS_Store
+*.tsbuildinfo
+
+# Local env files
+.env*.local
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vercel
+.vercel
+
+# Convex
+.convex/
+
+# OS files
+Thumbs.db
+.AppleDouble
+.LSOverride

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Arlee Test</title>
+    <script type="module">
+        import { ConvexHttpClient } from 'https://unpkg.com/convex@latest/browser/index.js';
+        
+        const client = new ConvexHttpClient('https://adventurous-cow-755.convex.cloud');
+        
+        async function test() {
+            console.log('Testing Convex...');
+            
+            // Test 1: Test query
+            const testResult = await client.query('functions/test:testQuery', {});
+            console.log('✅ Test query:', testResult);
+            document.getElementById('test-result').textContent = testResult.message;
+            
+            // Test 2: Get styles
+            const styles = await client.query('functions/styles:getPublicStyles', {});
+            console.log('✅ Styles:', styles);
+            document.getElementById('styles-result').textContent = `Found ${styles.length} styles: ${styles.map(s => s.name).join(', ')}`;
+            
+            // Test 3: Check if we can create a project (will fail without auth, but we can see the error)
+            try {
+                const project = await client.mutation('functions/projects:createProject', {
+                    name: 'Test Project',
+                    scenarioText: 'Test script',
+                    styleId: styles[0]._id
+                });
+                console.log('✅ Project created:', project);
+            } catch (error) {
+                console.log('⚠️ Project creation (expected):', error.message);
+                document.getElementById('project-result').textContent = `Auth required: ${error.message}`;
+            }
+        }
+        
+        test().catch(console.error);
+    </script>
+</head>
+<body>
+    <h1>Arlee Convex Test</h1>
+    <div>
+        <h2>Test Query:</h2>
+        <p id="test-result">Loading...</p>
+    </div>
+    <div>
+        <h2>Styles:</h2>
+        <p id="styles-result">Loading...</p>
+    </div>
+    <div>
+        <h2>Project Creation:</h2>
+        <p id="project-result">Testing...</p>
+    </div>
+</body>
+</html>
+
+
