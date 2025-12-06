@@ -123,45 +123,99 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
       engine.block.appendChild(pageId, trackId);
       engine.block.fillParent(trackId);
 
-      // Add images sequentially
-      let currentTime = 0;
-      const defaultImageDuration = 3; // 3 seconds per image
+      // Get page dimensions for proper image sizing
+      const pageWidth = engine.block.getWidth(pageId) || 1280;
+      const pageHeight = engine.block.getHeight(pageId) || 720;
 
-      for (const asset of assets.sort((a, b) => a.orderIndex - b.orderIndex)) {
+      // Get audio duration if available, otherwise use default
+      let audioDuration = 0;
+      if (audioUrl) {
+        audioDuration = await getAudioDuration(audioUrl);
+        console.log('[IMGVideoEditor] Audio duration:', audioDuration);
+      }
+
+      // Sort assets by orderIndex
+      const sortedAssets = assets.sort((a, b) => a.orderIndex - b.orderIndex);
+      const imageCount = sortedAssets.length;
+
+      // Calculate duration per image based on audio duration
+      // If no audio, use default 3 seconds per image
+      let durationPerImage: number;
+      let totalDuration: number;
+
+      if (audioDuration > 0 && imageCount > 0) {
+        // Distribute images evenly across entire audio duration
+        durationPerImage = audioDuration / imageCount;
+        totalDuration = audioDuration;
+        console.log('[IMGVideoEditor] Distributing images across audio', {
+          imageCount,
+          audioDuration,
+          durationPerImage: durationPerImage.toFixed(2)
+        });
+      } else {
+        // Fallback: 3 seconds per image if no audio
+        durationPerImage = 3;
+        totalDuration = imageCount * durationPerImage;
+        console.log('[IMGVideoEditor] No audio, using default duration per image:', durationPerImage);
+      }
+
+      // Add images sequentially, distributed across audio duration
+      let currentTime = 0;
+
+      for (const asset of sortedAssets) {
         try {
-          console.log('[IMGVideoEditor] Adding image clip', { url: asset.imageUrl, time: currentTime });
+          console.log('[IMGVideoEditor] Adding image clip', { 
+            url: asset.imageUrl, 
+            time: currentTime.toFixed(2),
+            duration: durationPerImage.toFixed(2)
+          });
           
           // Create graphic block for image
           const graphic = engine.block.create('graphic');
           engine.block.setShape(graphic, engine.block.createShape('rect'));
           engine.block.appendChild(trackId, graphic);
           
+          // Set proper dimensions to match page size
+          engine.block.setWidth(graphic, pageWidth);
+          engine.block.setHeight(graphic, pageHeight);
+          
           // Create image fill
           const imageFill = engine.block.createFill('image');
           engine.block.setString(imageFill, 'fill/image/imageFileURI', asset.imageUrl);
           
-          // Set fill and properties
-          engine.block.fillParent(graphic);
+          // Set fill and properties with proper scaling
+          engine.block.setFill(graphic, imageFill);
           try {
+            // Use 'cover' mode to maintain aspect ratio and fill the frame
             engine.block.setEnum(graphic, 'contentFill/mode', 'cover');
           } catch {}
           
-          engine.block.setFill(graphic, imageFill);
-          engine.block.setDuration(graphic, defaultImageDuration);
+          // Ensure graphic fills parent track
+          engine.block.fillParent(graphic);
+          
+          // Set duration and time offset
+          engine.block.setDuration(graphic, durationPerImage);
           engine.block.setTimeOffset(graphic, currentTime);
           
-          currentTime += defaultImageDuration;
-          console.log('[IMGVideoEditor] Image clip added successfully');
+          currentTime += durationPerImage;
+          console.log('[IMGVideoEditor] Image clip added successfully', { 
+            width: pageWidth, 
+            height: pageHeight,
+            duration: durationPerImage.toFixed(2),
+            timeOffset: currentTime.toFixed(2)
+          });
         } catch (imageError: any) {
           console.error('[IMGVideoEditor] Failed to add image:', imageError);
         }
       }
 
-      // Set page duration to match total content
-      const totalDuration = Math.max(currentTime, audioUrl ? await getAudioDuration(audioUrl) : currentTime);
+      // Set page duration to match total content (audio duration or calculated duration)
       try {
         engine.block.setDuration(pageId, totalDuration);
-      } catch {}
+        console.log('[IMGVideoEditor] Page duration set to:', totalDuration.toFixed(2));
+      } catch (durationError: any) {
+        console.warn('[IMGVideoEditor] Failed to set page duration:', durationError);
+      }
 
       console.log('[IMGVideoEditor] Timeline populated successfully', { imageCount: assets.length, totalDuration });
     } catch (error: any) {

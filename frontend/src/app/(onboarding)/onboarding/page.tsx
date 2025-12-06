@@ -60,7 +60,7 @@ function ProgressBar({ currentStep }: { currentStep: Step }) {
 }
 
 export default function OnboardingPage() {
-  const { styles, createProject, generateStoryboard, generateScript, isLoading, setProjectId } = useProject();
+  const { styles, createProject, generateStoryboard, generateScript, generateProjectAudio, isLoading, setProjectId } = useProject();
   const [step, setStep] = useState<Step>("script");
   const [scriptText, setScriptText] = useState("");
   const [scriptIdea, setScriptIdea] = useState("");
@@ -187,6 +187,22 @@ export default function OnboardingPage() {
       console.log("[OnboardingPage] Storyboard generation initiated");
       setGenerationProgress("Waiting for scenes...");
 
+      // Start audio generation immediately after storyboard generation starts
+      // This runs in parallel with image generation
+      try {
+        console.log("[OnboardingPage] Starting project audio generation in parallel...");
+        setGenerationProgress("Generating audio track...");
+        // Generate audio asynchronously - don't wait for it to complete
+        // Use the generateProjectAudio from useProject hook
+        generateProjectAudio(newProjectId, scriptText).catch((audioError: any) => {
+          console.warn("[OnboardingPage] Audio generation error (non-blocking):", audioError);
+          // Audio generation failure doesn't block the flow
+        });
+      } catch (audioError: any) {
+        console.warn("[OnboardingPage] Failed to start audio generation:", audioError);
+        // Continue even if audio generation fails to start
+      }
+
       // Note: Transition to result happens automatically via useEffect when scenes are created
       // No need for setTimeout - we wait for real-time updates from Convex
     } catch (error: any) {
@@ -239,9 +255,14 @@ export default function OnboardingPage() {
                 </div>
                 <div className="flex-1 flex justify-end">
                   <button
-                    onClick={() => setShowSettings(!showSettings)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowSettings(!showSettings);
+                    }}
                     className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] transition-colors"
                     title="Project Settings"
+                    type="button"
                   >
                     <svg className="w-6 h-6 text-[hsl(var(--foreground))]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -258,8 +279,13 @@ export default function OnboardingPage() {
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xl font-bold text-[hsl(var(--foreground))]">Project Settings</h3>
                     <button
-                      onClick={() => setShowSettings(false)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowSettings(false);
+                      }}
                       className="text-[hsl(var(--foreground))]/70 hover:text-[hsl(var(--foreground))]"
+                      type="button"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -391,7 +417,9 @@ export default function OnboardingPage() {
                   disabled={isGeneratingScript}
                 />
                 <button
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     if (!scriptIdea.trim()) {
                       alert("Please enter an idea for script generation");
                       return;
@@ -415,6 +443,7 @@ export default function OnboardingPage() {
                   }}
                   disabled={isGeneratingScript || !scriptIdea.trim()}
                   className="btn-primary px-6 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  type="button"
                 >
                   {isGeneratingScript ? "Generating..." : "Generate Script"}
                 </button>
@@ -451,9 +480,7 @@ export default function OnboardingPage() {
               )}
             </div>
             <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
+              onClick={() => {
                 const trimmed = scriptText.trim();
                 console.log("[OnboardingPage] Continue button clicked", { 
                   scriptText, 
@@ -493,8 +520,13 @@ export default function OnboardingPage() {
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-[hsl(var(--foreground))]/70">Your Script:</span>
                 <button
-                  onClick={() => setStep("script")}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setStep("script");
+                  }}
                   className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
+                  type="button"
                 >
                   Edit
                 </button>
@@ -507,12 +539,17 @@ export default function OnboardingPage() {
               {styles.map((style) => (
                 <button
                   key={style._id}
-                  onClick={() => setSelectedStyleId(style._id)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSelectedStyleId(style._id);
+                  }}
                   className={`card p-0 overflow-hidden text-left transition-all duration-200 ${
                     selectedStyleId === style._id
                       ? "ring-2 ring-[hsl(var(--primary))] bg-[hsl(var(--primary))]/5 shadow-elevation-2"
                       : "hover:shadow-elevation-2 hover:border-[hsl(var(--primary))]/30"
                   }`}
+                  type="button"
                 >
                   {style.imageUrl && (
                     <div className="w-full h-32 overflow-hidden bg-[hsl(var(--muted))]">
@@ -533,15 +570,25 @@ export default function OnboardingPage() {
             </div>
             <div className="flex gap-4">
               <button
-                onClick={() => setStep("script")}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setStep("script");
+                }}
                 className="btn-secondary flex-1"
+                type="button"
               >
                 Back
               </button>
               <button
-                onClick={handleStart}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleStart();
+                }}
                 disabled={!selectedStyleId || isGenerating}
                 className="btn-primary flex-1"
+                type="button"
               >
                 {isGenerating ? "Generating..." : "Generate Storyboard"}
               </button>
