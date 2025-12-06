@@ -161,14 +161,26 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
       // Create track for images
       const trackId = engine.block.create('track');
       engine.block.appendChild(pageId, trackId);
-      // Set track to fill parent page (16:9 landscape)
-      engine.block.fillParent(trackId);
       
-      // Ensure track has correct dimensions matching page
+      // CRITICAL: Set track dimensions FIRST to ensure 16:9 landscape format
       try {
         engine.block.setWidth(trackId, pageWidth);
         engine.block.setHeight(trackId, pageHeight);
+        console.log('[IMGVideoEditor] Track dimensions set:', { width: pageWidth, height: pageHeight });
       } catch {}
+      
+      // Then fill parent to ensure proper scaling
+      engine.block.fillParent(trackId);
+      
+      // Verify track dimensions
+      const trackWidth = engine.block.getWidth(trackId);
+      const trackHeight = engine.block.getHeight(trackId);
+      console.log('[IMGVideoEditor] Track final dimensions:', {
+        width: trackWidth,
+        height: trackHeight,
+        aspectRatio: trackWidth && trackHeight ? (trackWidth / trackHeight).toFixed(2) : 'N/A',
+        expected: '16:9 (1.78)'
+      });
 
       // Get audio duration if available, otherwise use default
       let audioDuration = 0;
@@ -342,7 +354,7 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
 
         setStatus('Creating editor...');
 
-        // Create editor config
+        // Create editor config for Landscape (16:9) video
         const config = {
           license,
           baseURL,
@@ -387,6 +399,9 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
           },
           scene: {
             designUnit: 'Pixel',
+            // Landscape (16:9) video configuration
+            defaultPageWidth: 1920,
+            defaultPageHeight: 1080,
           },
           libraries: {
             insert: {
@@ -452,19 +467,54 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
 
         // Create video scene with Landscape resolution (1920x1080 Full HD)
         try {
+          console.log('[IMGVideoEditor] Creating video scene with Landscape (16:9) configuration...');
           const sceneId = await instance.createVideoScene();
+          console.log('[IMGVideoEditor] Video scene created with ID:', sceneId);
+          
           if (sceneId) {
             const engine = instance.engine;
+            
+            // Wait a bit for engine synchronization
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
             const pageId = engine.scene.getCurrentPage();
+            console.log('[IMGVideoEditor] Current page ID:', pageId);
+            
             if (pageId) {
-              // Landscape resolution: 1920x1080 (Full HD)
+              // Landscape resolution: 1920x1080 (Full HD, 16:9 aspect ratio)
               engine.block.setWidth(pageId, 1920);
               engine.block.setHeight(pageId, 1080);
-              console.log('[IMGVideoEditor] Video scene created with Landscape resolution: 1920x1080');
+              
+              // Verify dimensions were set correctly
+              const actualWidth = engine.block.getWidth(pageId);
+              const actualHeight = engine.block.getHeight(pageId);
+              const aspectRatio = actualWidth && actualHeight ? (actualWidth / actualHeight).toFixed(2) : 'N/A';
+              
+              console.log('[IMGVideoEditor] Video scene configured with Landscape resolution:', {
+                width: actualWidth,
+                height: actualHeight,
+                aspectRatio,
+                expected: '16:9 (1.78)'
+              });
+              
+              // Ensure page is properly configured for landscape
+              if (actualWidth && actualHeight && (actualWidth / actualHeight) < 1.5) {
+                console.warn('[IMGVideoEditor] Page aspect ratio seems incorrect, forcing landscape:', {
+                  current: `${actualWidth}x${actualHeight}`,
+                  expected: '1920x1080'
+                });
+                // Force landscape dimensions
+                engine.block.setWidth(pageId, 1920);
+                engine.block.setHeight(pageId, 1080);
+              }
+            } else {
+              console.warn('[IMGVideoEditor] No page available after scene creation');
             }
+          } else {
+            console.warn('[IMGVideoEditor] Scene ID is null/undefined');
           }
-        } catch (error) {
-          console.warn('Video scene setup warning:', error);
+        } catch (error: any) {
+          console.error('[IMGVideoEditor] Video scene setup error:', error?.message || error);
         }
 
       } catch (e: any) {
