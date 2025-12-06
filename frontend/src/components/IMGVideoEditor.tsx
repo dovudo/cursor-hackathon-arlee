@@ -52,6 +52,124 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
     };
   }, []);
 
+  // Helper function to get audio duration
+  const getAudioDuration = useCallback(async (audioUrl: string): Promise<number> => {
+    return new Promise((resolve) => {
+      const audio = new Audio(audioUrl);
+      audio.addEventListener('loadedmetadata', () => {
+        resolve(audio.duration || 30); // Default 30s if duration unavailable
+      });
+      audio.addEventListener('error', () => {
+        resolve(30); // Fallback duration
+      });
+      audio.load();
+    });
+  }, []);
+
+  // Add assets to timeline (images and audio)
+  const addAssetsToTimeline = useCallback(async (assets: { imageUrl: string; orderIndex: number }[], audioUrl?: string) => {
+    if (!editorRef.current || !ready) {
+      console.warn('[IMGVideoEditor] Editor not ready for addAssetsToTimeline');
+      return;
+    }
+
+    try {
+      console.log('[IMGVideoEditor] Adding assets to timeline', { imageCount: assets.length, hasAudio: !!audioUrl });
+      const engine = editorRef.current.engine;
+      
+      // Get current page
+      const pageId = engine.scene.getCurrentPage();
+      if (!pageId) {
+        console.error('[IMGVideoEditor] No page available');
+        return;
+      }
+
+      // Clear existing tracks
+      const existingTracks = engine.block.findByType('track').filter((id: any) => engine.block.getParent(id) === pageId);
+      existingTracks.forEach((trackId: any) => {
+        try {
+          const children = engine.block.getChildren(trackId) || [];
+          children.forEach((childId: any) => {
+            try { engine.block.destroy(childId); } catch {}
+          });
+          engine.block.destroy(trackId);
+        } catch (e) {
+          console.warn('[IMGVideoEditor] Failed to clear track', e);
+        }
+      });
+
+      // Add audio track if available
+      if (audioUrl) {
+        try {
+          console.log('[IMGVideoEditor] Adding audio track', audioUrl);
+          const audioClip = engine.block.create('audio');
+          engine.block.appendChild(pageId, audioClip);
+          engine.block.setString(audioClip, 'audio/fileURI', audioUrl);
+          engine.block.setTimeOffset(audioClip, 0);
+          
+          // Get audio duration
+          const audioDuration = await getAudioDuration(audioUrl);
+          engine.block.setDuration(audioClip, audioDuration);
+          engine.block.setVolume(audioClip, 0.7);
+          
+          console.log('[IMGVideoEditor] Audio track added', { duration: audioDuration });
+        } catch (audioError: any) {
+          console.error('[IMGVideoEditor] Failed to add audio:', audioError);
+        }
+      }
+
+      // Create track for images
+      const trackId = engine.block.create('track');
+      engine.block.appendChild(pageId, trackId);
+      engine.block.fillParent(trackId);
+
+      // Add images sequentially
+      let currentTime = 0;
+      const defaultImageDuration = 3; // 3 seconds per image
+
+      for (const asset of assets.sort((a, b) => a.orderIndex - b.orderIndex)) {
+        try {
+          console.log('[IMGVideoEditor] Adding image clip', { url: asset.imageUrl, time: currentTime });
+          
+          // Create graphic block for image
+          const graphic = engine.block.create('graphic');
+          engine.block.setShape(graphic, engine.block.createShape('rect'));
+          engine.block.appendChild(trackId, graphic);
+          
+          // Create image fill
+          const imageFill = engine.block.createFill('image');
+          engine.block.setString(imageFill, 'fill/image/imageFileURI', asset.imageUrl);
+          
+          // Set fill and properties
+          engine.block.fillParent(graphic);
+          try {
+            engine.block.setEnum(graphic, 'contentFill/mode', 'cover');
+          } catch {}
+          
+          engine.block.setFill(graphic, imageFill);
+          engine.block.setDuration(graphic, defaultImageDuration);
+          engine.block.setTimeOffset(graphic, currentTime);
+          
+          currentTime += defaultImageDuration;
+          console.log('[IMGVideoEditor] Image clip added successfully');
+        } catch (imageError: any) {
+          console.error('[IMGVideoEditor] Failed to add image:', imageError);
+        }
+      }
+
+      // Set page duration to match total content
+      const totalDuration = Math.max(currentTime, audioUrl ? await getAudioDuration(audioUrl) : currentTime);
+      try {
+        engine.block.setDuration(pageId, totalDuration);
+      } catch {}
+
+      console.log('[IMGVideoEditor] Timeline populated successfully', { imageCount: assets.length, totalDuration });
+    } catch (error: any) {
+      console.error('[IMGVideoEditor] Failed to add assets to timeline:', error);
+      throw error;
+    }
+  }, [ready, getAudioDuration]);
+
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
     export: async () => {
@@ -77,6 +195,7 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
         throw error;
       }
     },
+    addAssetsToTimeline,
   }));
 
   // Initialize IMG.LY editor

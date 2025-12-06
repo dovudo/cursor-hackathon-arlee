@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useProject } from "@/context/ProjectContext";
 import { Id } from "../../convex/_generated/dataModel";
 import { useQuery, useMutation } from "convex/react";
@@ -11,98 +12,15 @@ interface StoryboardViewProps {
   projectId: Id<"projects">;
 }
 
-interface AudioSectionProps {
-  scene: {
-    _id: Id<"scenes">;
-    audioUrl?: string;
-    scriptContent?: string;
-  };
-  generateAudio: (sceneId: Id<"scenes">, text: string) => Promise<void>;
-  onRetry?: (sceneId: Id<"scenes">) => void;
-}
-
-function AudioSection({ scene, generateAudio, onRetry }: AudioSectionProps) {
-  const audioEvents = useQuery(api.functions.generationEvents.getEventsByScene, { sceneId: scene._id }) ?? [];
-  const failedAudioEvent = audioEvents.find(e => e.type === "audio" && e.status === "failed");
-  const processingAudioEvent = audioEvents.find(e => e.type === "audio" && (e.status === "pending" || e.status === "processing"));
-
-  return (
-    <div>
-      <h4 className="font-semibold mb-2 text-[hsl(var(--foreground))]">Audio</h4>
-      {scene.audioUrl ? (
-        <div className="card p-4">
-          <audio controls className="w-full">
-            <source src={scene.audioUrl} type="audio/mpeg" />
-            Your browser does not support the audio element.
-          </audio>
-        </div>
-      ) : (
-        <div className="w-full h-48 bg-[hsl(var(--muted))] rounded-lg border border-[hsl(var(--border))] flex items-center justify-center">
-          <div className="text-center px-4">
-            {scene.scriptContent ? (
-              <>
-                {failedAudioEvent ? (
-                  <>
-                    <div className="text-red-500 mb-2">
-                      <svg className="w-8 h-8 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <p className="text-sm text-red-500 mb-2 font-semibold">Audio generation failed</p>
-                    <p className="text-xs text-[hsl(var(--foreground))]/70 mb-3 max-w-md">
-                      {failedAudioEvent.errorMessage || "Unknown error occurred"}
-                    </p>
-                    <button
-                      onClick={() => {
-                        if (onRetry) onRetry(scene._id);
-                        generateAudio(scene._id, scene.scriptContent!).catch(console.error);
-                      }}
-                      className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
-                    >
-                      Retry
-                    </button>
-                  </>
-                ) : processingAudioEvent ? (
-                  <>
-                    <div className="animate-spin rounded-full h-8 w-8 border-2 border-[hsl(var(--primary))] border-t-transparent mx-auto mb-2"></div>
-                    <p className="text-sm text-[hsl(var(--foreground))]/70 mb-2">Generating audio...</p>
-                    <button
-                      onClick={() => {
-                        if (onRetry) onRetry(scene._id);
-                        generateAudio(scene._id, scene.scriptContent!).catch(console.error);
-                      }}
-                      className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
-                    >
-                      Retry
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm text-[hsl(var(--foreground))]/70 mb-2">Ready to generate audio</p>
-                    <button
-                      onClick={() => generateAudio(scene._id, scene.scriptContent!).catch(console.error)}
-                      className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
-                    >
-                      Generate Audio
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-[hsl(var(--foreground))]/50">No script content</p>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// AudioSection removed - we use single project-level audio track, not per-scene
 
 export default function StoryboardView({ projectId }: StoryboardViewProps) {
-  const { generateImage, generateAudio } = useProject();
+  const router = useRouter();
+  const { generateImage, generateProjectAudio, setProjectId } = useProject();
   const [activeTab, setActiveTab] = useState<"scenes" | "timeline" | "settings">("scenes");
   const videoEditorRef = useRef<any>(null);
   const [showSettingsForm, setShowSettingsForm] = useState(false);
+  const [isGeneratingProjectAudio, setIsGeneratingProjectAudio] = useState(false);
   
   // Get project and scenes
   const project = useQuery(api.functions.projects.getProjectById, { projectId });
@@ -110,7 +28,7 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
   
   // Settings form state
   const [settings, setSettings] = useState({
-    language: project?.settings?.language || "ru",
+    language: project?.settings?.language || "en",
     pacing: project?.settings?.pacing || "moderate",
     target_duration: project?.settings?.target_duration || 60,
     min_sec: project?.settings?.min_sec || 2,
@@ -124,7 +42,7 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
   useEffect(() => {
     if (project?.settings) {
       setSettings({
-        language: project.settings.language || "ru",
+        language: project.settings.language || "en",
         pacing: project.settings.pacing || "moderate",
         target_duration: project.settings.target_duration || 60,
         min_sec: project.settings.min_sec || 2,
@@ -141,11 +59,9 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
 
   // Track which scenes are currently generating to prevent duplicates
   const generatingImagesRef = useRef<Set<Id<"scenes">>>(new Set());
-  const generatingAudioRef = useRef<Set<Id<"scenes">>>(new Set());
-  // Track scenes that failed audio generation to prevent infinite retries
-  const failedAudioScenesRef = useRef<Set<Id<"scenes">>>(new Set());
 
-  // Auto-generate images and audio for scenes that don't have them
+  // Auto-generate images for scenes that don't have them
+  // NOTE: Audio is generated at project level, not per scene
   useEffect(() => {
     scenes.forEach((scene) => {
       // Generate image if needed and not already generating
@@ -160,36 +76,48 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
             generatingImagesRef.current.delete(scene._id);
           });
       }
-      
-      // Generate audio if needed and not already generating (separate tracking)
-      // Skip if audio generation failed before (user can manually retry)
-      if (
-        !scene.audioUrl && 
-        scene.scriptContent && 
-        !generatingAudioRef.current.has(scene._id) &&
-        !failedAudioScenesRef.current.has(scene._id)
-      ) {
-        generatingAudioRef.current.add(scene._id);
-        console.log("[StoryboardView] Auto-generating audio for scene", scene._id);
-        generateAudio(scene._id, scene.scriptContent)
-          .catch((error) => {
-            console.error("[StoryboardView] Error generating audio:", error);
-            // Mark as failed to prevent infinite retries
-            failedAudioScenesRef.current.add(scene._id);
-          })
-          .finally(() => {
-            generatingAudioRef.current.delete(scene._id);
-          });
-      }
     });
-  }, [scenes, generateImage, generateAudio]); // Removed activeTab from dependencies
+  }, [scenes, generateImage]);
 
   // Track if timeline was already populated to prevent duplicate calls
   const timelinePopulatedRef = useRef<string>("");
 
-  // Add images to timeline when switching to timeline tab or when images are ready
+  // Function to add assets to timeline (can be called manually or automatically)
+  const handleAddToTimeline = async () => {
+    if (!videoEditorRef.current?.addAssetsToTimeline || scenes.length === 0 || !project) {
+      console.warn("[StoryboardView] Cannot add to timeline: missing editor, scenes, or project");
+      return;
+    }
+
+    // Use scenes from useQuery (automatically updated via real-time)
+    const scenesWithImages = scenes
+      .filter(s => s.imageUrl)
+      .map(s => ({
+        imageUrl: s.imageUrl!,
+        orderIndex: s.orderIndex,
+      }));
+    
+    if (scenesWithImages.length === 0) {
+      alert("No images available to add to timeline. Please generate images for scenes first.");
+      return;
+    }
+
+    try {
+      console.log("[StoryboardView] Adding to timeline:", scenesWithImages.length, "images and audio:", project.audioUrl || "none");
+      await videoEditorRef.current.addAssetsToTimeline(scenesWithImages, project.audioUrl || undefined);
+      
+      // Update the populated ref to track what was added
+      const timelineKey = `${scenesWithImages.map(s => `${s.orderIndex}:${s.imageUrl}`).join('|')}|audio:${project.audioUrl || 'none'}`;
+      timelinePopulatedRef.current = timelineKey;
+    } catch (error) {
+      console.error("[StoryboardView] Error adding to timeline:", error);
+      alert(`Failed to add assets to timeline: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  };
+
+  // Add images and audio to timeline when switching to timeline tab (auto-populate)
   useEffect(() => {
-    if (activeTab === "timeline" && videoEditorRef.current?.addAssetsToTimeline && scenes.length > 0) {
+    if (activeTab === "timeline" && videoEditorRef.current?.addAssetsToTimeline && scenes.length > 0 && project) {
       // Wait a bit for editor to be fully ready
       const timer = setTimeout(() => {
         // Use scenes from useQuery (automatically updated via real-time)
@@ -200,20 +128,20 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
             orderIndex: s.orderIndex,
           }));
         
-        // Create a key from all image URLs to detect changes
-        const timelineKey = scenesWithImages.map(s => `${s.orderIndex}:${s.imageUrl}`).join('|');
+        // Create a key from all image URLs and audio URL to detect changes
+        const timelineKey = `${scenesWithImages.map(s => `${s.orderIndex}:${s.imageUrl}`).join('|')}|audio:${project.audioUrl || 'none'}`;
         
-        // Only populate if images changed (different key)
+        // Only populate if assets changed (different key)
         if (scenesWithImages.length > 0 && timelinePopulatedRef.current !== timelineKey) {
           timelinePopulatedRef.current = timelineKey;
-          console.log("[StoryboardView] Populating timeline with", scenesWithImages.length, "images");
-          videoEditorRef.current?.addAssetsToTimeline(scenesWithImages).catch(console.error);
+          console.log("[StoryboardView] Populating timeline with", scenesWithImages.length, "images and audio:", project.audioUrl || "none");
+          videoEditorRef.current?.addAssetsToTimeline(scenesWithImages, project.audioUrl || undefined).catch(console.error);
         }
       }, 2000);
 
       return () => clearTimeout(timer);
     }
-  }, [activeTab, scenes]); // scenes from useQuery automatically updates, removed videoEditorRef
+  }, [activeTab, scenes, project]); // scenes and project from useQuery automatically updates
 
   if (!scenes || scenes.length === 0) {
     return (
@@ -276,23 +204,98 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
 
         {/* Timeline Tab */}
         {activeTab === "timeline" && (
-          <div className="card p-4 mb-6">
-            <IMGVideoEditor
-              ref={videoEditorRef}
-              projectId={projectId}
-              onExport={(blob) => {
-                console.log("Video exported:", blob);
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "storyboard-video.mp4";
-                a.click();
-              }}
-              onSave={(data) => {
-                console.log("Timeline saved:", data);
-              }}
-              className="w-full"
-            />
+          <div className="space-y-6">
+            {/* Add to Timeline Button */}
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-[hsl(var(--foreground))]">Timeline Editor</h3>
+                <button
+                  onClick={handleAddToTimeline}
+                  className="btn-primary"
+                  disabled={scenes.filter(s => s.imageUrl).length === 0}
+                >
+                  Add to Timeline
+                </button>
+              </div>
+              <p className="text-sm text-[hsl(var(--foreground))]/70">
+                Click "Add to Timeline" to place all generated scenes and audio on the video timeline. 
+                {scenes.filter(s => s.imageUrl).length === 0 && " Generate images for scenes first."}
+              </p>
+            </div>
+
+            {/* Project Audio Track */}
+            <div className="card p-6">
+              <h3 className="text-xl font-bold mb-4 text-[hsl(var(--foreground))]">Project Audio Track</h3>
+              {project?.audioUrl ? (
+                <div className="space-y-4">
+                  <audio controls className="w-full">
+                    <source src={project.audioUrl} type="audio/mpeg" />
+                    Your browser does not support the audio element.
+                  </audio>
+                  <p className="text-sm text-[hsl(var(--foreground))]/70">
+                    This audio track will be used for all scenes in the video editor. Scenes will be placed according to STT timestamps.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-6 bg-[hsl(var(--muted))] rounded-lg border border-[hsl(var(--border))] text-center">
+                    {isGeneratingProjectAudio ? (
+                      <>
+                        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[hsl(var(--primary))] border-t-transparent mx-auto mb-2"></div>
+                        <p className="text-sm text-[hsl(var(--foreground))]/70">Generating project audio...</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-[hsl(var(--foreground))]/70 mb-4">
+                          Generate a single audio track for the entire project from the script text.
+                        </p>
+                        <button
+                          onClick={async () => {
+                            if (!project?.scenarioText) {
+                              alert("No script text available for audio generation");
+                              return;
+                            }
+                            try {
+                              setIsGeneratingProjectAudio(true);
+                              await generateProjectAudio(projectId, project.scenarioText);
+                            } catch (error: any) {
+                              console.error("[StoryboardView] Error generating project audio:", error);
+                              alert(`Failed to generate audio: ${error.message || "Unknown error"}`);
+                            } finally {
+                              setIsGeneratingProjectAudio(false);
+                            }
+                          }}
+                          disabled={isGeneratingProjectAudio || !project?.scenarioText}
+                          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Generate Project Audio
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Video Editor */}
+            <div className="card p-4">
+              <IMGVideoEditor
+                ref={videoEditorRef}
+                projectId={projectId}
+                onExport={(blob) => {
+                  console.log("Video exported:", blob);
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "storyboard-video.mp4";
+                  a.click();
+                }}
+                onSave={(data) => {
+                  console.log("Timeline saved:", data);
+                }}
+                className="w-full"
+              />
+            </div>
           </div>
         )}
 
@@ -306,18 +309,18 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
                 <label className="block text-sm font-medium mb-2 text-[hsl(var(--foreground))]">
                   Language
                 </label>
-                <select
-                  value={settings.language}
-                  onChange={(e) => setSettings({ ...settings, language: e.target.value })}
-                  className="w-full p-2 border border-[hsl(var(--border))] rounded-lg bg-[hsl(var(--background))] text-[hsl(var(--foreground))]"
-                >
-                  <option value="ru">Russian</option>
-                  <option value="en">English</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="de">German</option>
-                  <option value="zh">Chinese</option>
-                </select>
+                  <select
+                    value={settings.language}
+                    onChange={(e) => setSettings({ ...settings, language: e.target.value })}
+                    className="w-full p-2 border border-[hsl(var(--border))] rounded-lg bg-[hsl(var(--background))] text-[hsl(var(--foreground))]"
+                  >
+                    <option value="en">English</option>
+                    <option value="ru">Russian</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="zh">Chinese</option>
+                  </select>
               </div>
 
               {/* Pacing */}
@@ -490,47 +493,37 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
                   <h3 className="text-2xl font-bold mb-3 text-[hsl(var(--foreground))]">{scene.name}</h3>
                   <p className="text-[hsl(var(--foreground))]/80 mb-4 leading-relaxed">{scene.scriptContent}</p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Image */}
-                    <div>
-                      <h4 className="font-semibold mb-2 text-[hsl(var(--foreground))]">Image</h4>
-                      {scene.imageUrl ? (
+                  {/* Image */}
+                  <div>
+                    <h4 className="font-semibold mb-2 text-[hsl(var(--foreground))]">Image</h4>
+                    {scene.imageUrl ? (
+                      <div className="w-full">
                         <img
                           src={scene.imageUrl}
                           alt={scene.name}
-                          className="w-full h-48 object-cover rounded-lg border border-[hsl(var(--border))] shadow-elevation-1"
+                          className="w-full max-h-[600px] object-contain rounded-lg border border-[hsl(var(--border))] shadow-elevation-1 bg-[hsl(var(--muted))]"
                         />
-                      ) : (
-                        <div className="w-full h-48 bg-[hsl(var(--muted))] rounded-lg border border-[hsl(var(--border))] flex items-center justify-center">
-                          <div className="text-center">
-                            {scene.imagePrompt ? (
-                              <>
-                                <div className="animate-spin rounded-full h-8 w-8 border-2 border-[hsl(var(--primary))] border-t-transparent mx-auto mb-2"></div>
-                                <p className="text-sm text-[hsl(var(--foreground))]/70 mb-2">Generating image...</p>
-                                <button
-                                  onClick={() => generateImage(scene._id, scene.imagePrompt!).catch(console.error)}
-                                  className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
-                                >
-                                  Retry
-                                </button>
-                              </>
-                            ) : (
-                              <p className="text-sm text-[hsl(var(--foreground))]/50">No image prompt</p>
-                            )}
-                          </div>
+                      </div>
+                    ) : (
+                      <div className="w-full h-96 bg-[hsl(var(--muted))] rounded-lg border border-[hsl(var(--border))] flex items-center justify-center">
+                        <div className="text-center">
+                          {scene.imagePrompt ? (
+                            <>
+                              <div className="animate-spin rounded-full h-8 w-8 border-2 border-[hsl(var(--primary))] border-t-transparent mx-auto mb-2"></div>
+                              <p className="text-sm text-[hsl(var(--foreground))]/70 mb-2">Generating image...</p>
+                              <button
+                                onClick={() => generateImage(scene._id, scene.imagePrompt!).catch(console.error)}
+                                className="text-xs text-[hsl(var(--primary))] hover:text-[hsl(var(--primary-dark))] underline"
+                              >
+                                Retry
+                              </button>
+                            </>
+                          ) : (
+                            <p className="text-sm text-[hsl(var(--foreground))]/50">No image prompt</p>
+                          )}
                         </div>
-                      )}
-                    </div>
-
-                    {/* Audio */}
-                    <AudioSection 
-                      scene={scene} 
-                      generateAudio={generateAudio}
-                      onRetry={(sceneId) => {
-                        // Clear failed flag when user manually retries
-                        failedAudioScenesRef.current.delete(sceneId);
-                      }}
-                    />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -541,7 +534,11 @@ export default function StoryboardView({ projectId }: StoryboardViewProps) {
 
         <div className="mt-8 text-center">
           <button
-            onClick={() => window.location.href = "/onboarding"}
+            onClick={() => {
+              // Reset project state and navigate to onboarding
+              setProjectId(null);
+              router.push("/onboarding");
+            }}
             className="btn-primary"
           >
             Create New Storyboard

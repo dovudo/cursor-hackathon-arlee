@@ -12,10 +12,20 @@ interface ProjectContextType {
   scenes: any[];
   styles: any[];
   isLoading: boolean;
-  createProject: (name: string, scenarioText: string, styleId: Id<"styles">) => Promise<Id<"projects">>;
+  createProject: (name: string, scenarioText: string, styleId: Id<"styles">, settings?: {
+    language?: string;
+    pacing?: "dynamic" | "moderate" | "slow" | "custom";
+    target_duration?: number;
+    min_sec?: number;
+    max_sec?: number;
+    framing?: string;
+    audience?: string;
+    wordsPerMinute?: number;
+  }) => Promise<Id<"projects">>;
   generateStoryboard: (projectId: Id<"projects">, scenarioText: string, styleId: Id<"styles">) => Promise<void>;
+  generateScript: (idea: string, options?: { language?: string; duration?: number; style?: string; targetAudience?: string }) => Promise<{ narration_text: string; title?: string; language?: string }>;
   generateImage: (sceneId: Id<"scenes">, prompt: string) => Promise<void>;
-  generateAudio: (sceneId: Id<"scenes">, text: string) => Promise<void>;
+  generateProjectAudio: (projectId: Id<"projects">, text: string) => Promise<void>;
   setProjectId: (id: Id<"projects"> | null) => void;
 }
 
@@ -37,23 +47,34 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   // Mutations
   const createProjectMutation = useMutation(api.functions.projects.createProject);
-  const createEventMutation = useMutation(api.functions.generationEvents.createEvent);
-  const updateEventMutation = useMutation(api.functions.generationEvents.updateEvent);
   const generateAudioUploadUrlMutation = useMutation(api.functions.scenes.generateAudioUploadUrl);
-  const updateSceneAudioFromStorageMutation = useMutation(api.functions.scenes.updateSceneAudioFromStorage);
+  
+  // Actions
+  const updateProjectAudioFromStorageAction = useAction(api.functions.projects.updateProjectAudioFromStorage);
 
   // Actions
   const generateStoryboardAction = useAction(api.functions.storyboard.generateStoryboard);
+  const generateScriptAction = useAction(api.functions.script.generateScript);
   const generateImageAction = useAction(api.functions.images.generateImage);
 
   const createProject = async (
     name: string,
     scenarioText: string,
-    styleId: Id<"styles">
+    styleId: Id<"styles">,
+    settings?: {
+      language?: string;
+      pacing?: "dynamic" | "moderate" | "slow" | "custom";
+      target_duration?: number;
+      min_sec?: number;
+      max_sec?: number;
+      framing?: string;
+      audience?: string;
+      wordsPerMinute?: number;
+    }
   ): Promise<Id<"projects">> => {
-    // Add default settings for MVP
-    const defaultSettings = {
-      language: "ru",
+    // Use provided settings or default settings for MVP
+    const projectSettings = settings || {
+      language: "en",
       pacing: "moderate" as const,
       target_duration: 60,
       min_sec: 2,
@@ -67,7 +88,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       name,
       scenarioText,
       styleId,
-      settings: defaultSettings,
+      settings: projectSettings,
     });
     setProjectId(newProjectId);
     return newProjectId;
@@ -85,6 +106,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const generateScript = async (
+    idea: string,
+    options?: { language?: string; duration?: number; style?: string; targetAudience?: string }
+  ) => {
+    const result = await generateScriptAction({
+      idea,
+      language: options?.language,
+      duration: options?.duration,
+      targetWords: options?.duration ? Math.round(options.duration * 140) : undefined,
+      style: options?.style,
+      targetAudience: options?.targetAudience,
+    });
+    
+    if (!result.success || !result.data) {
+      throw new Error("Failed to generate script");
+    }
+    
+    return result.data;
+  };
+
   const generateImage = async (sceneId: Id<"scenes">, prompt: string) => {
     await generateImageAction({
       sceneId,
@@ -92,30 +133,19 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const generateAudio = async (sceneId: Id<"scenes">, text: string) => {
-    // Create generation event before starting
-    const eventId = await createEventMutation({
-      sceneId,
-      type: "audio",
-    });
-
+  // Generate single audio track for entire project (not per scene)
+  const generateProjectAudio = async (projectId: Id<"projects">, text: string) => {
     try {
-      // Update to processing
-      await updateEventMutation({
-        eventId,
-        status: "processing",
-      });
-
       // Generate audio on client-side using ElevenLabs API
-      console.log("[generateAudio] Generating TTS on client-side...");
+      console.log("[generateProjectAudio] Generating TTS on client-side...");
       const audioBlob = await generateTTS({ text });
       
       // Get upload URL from Convex
-      console.log("[generateAudio] Getting upload URL from Convex...");
+      console.log("[generateProjectAudio] Getting upload URL from Convex...");
       const uploadUrl = await generateAudioUploadUrlMutation();
       
       // Upload audio file directly to Convex Storage
-      console.log("[generateAudio] Uploading audio to Convex Storage...");
+      console.log("[generateProjectAudio] Uploading audio to Convex Storage...");
       const uploadResponse = await fetch(uploadUrl, {
         method: "POST",
         headers: {
@@ -129,45 +159,55 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         throw new Error(`Failed to upload to Convex Storage: ${errorText}`);
       }
       
-      // Convex Storage returns storageId - could be plain text or JSON
+      // Convex Storage returns storageId - could be plain text or JSON string
       const responseText = await uploadResponse.text();
       if (!responseText) {
         throw new Error("No storageId returned from upload");
       }
       
-      // Parse storageId - handle both JSON and plain text formats
+      // Parse storageId - Convex Storage may return JSON string or plain text
       let storageId: Id<"_storage">;
       try {
-        // Try parsing as JSON first (in case Convex returns JSON)
-        const jsonResponse = JSON.parse(responseText);
-        storageId = (jsonResponse.storageId || jsonResponse.id || responseText) as Id<"_storage">;
-      } catch {
-        // If not JSON, use as plain text ID
+        let parsed: any = responseText.trim();
+        
+        // Handle double JSON encoding
+        if (parsed.startsWith('"') && parsed.endsWith('"')) {
+          parsed = JSON.parse(parsed);
+        }
+        
+        if (typeof parsed === 'string' && (parsed.startsWith('{') || parsed.startsWith('"'))) {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {
+            // If second parse fails, use the string as-is
+          }
+        }
+        
+        if (typeof parsed === 'object' && parsed !== null) {
+          storageId = (parsed.storageId || parsed.id || parsed) as Id<"_storage">;
+        } else {
+          storageId = parsed as Id<"_storage">;
+        }
+      } catch (error) {
+        console.warn("[generateProjectAudio] Failed to parse storageId, using as-is:", responseText, error);
         storageId = responseText.trim() as Id<"_storage">;
       }
       
-      // Update scene with audio URL from storage
-      const result = await updateSceneAudioFromStorageMutation({
-        sceneId,
+      if (!storageId) {
+        throw new Error(`Invalid storageId format: ${responseText}`);
+      }
+      
+      console.log("[generateProjectAudio] Parsed storageId:", storageId);
+      
+      // Update project with audio URL from storage (via action)
+      const result = await updateProjectAudioFromStorageAction({
+        projectId,
         storageId,
       });
       
-      // Update event to completed
-      await updateEventMutation({
-        eventId,
-        status: "completed",
-        resultUrl: result.audioUrl,
-      });
-      
-      console.log("[generateAudio] Audio uploaded successfully");
+      console.log("[generateProjectAudio] Project audio uploaded successfully");
     } catch (error: any) {
-      console.error("[generateAudio] Error:", error);
-      // Update event with error
-      await updateEventMutation({
-        eventId,
-        status: "failed",
-        errorMessage: error.message || "Unknown error",
-      });
+      console.error("[generateProjectAudio] Error:", error);
       throw error;
     }
   };
@@ -182,8 +222,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         isLoading: styles === undefined || (projectId !== null && project === undefined),
         createProject,
         generateStoryboard,
+        generateScript,
         generateImage,
-        generateAudio,
+        generateProjectAudio,
         setProjectId,
       }}
     >

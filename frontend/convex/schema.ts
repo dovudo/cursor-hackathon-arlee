@@ -25,6 +25,8 @@ export default defineSchema({
     name: v.string(),
     scenarioText: v.string(),
     styleId: v.id("styles"),
+    // Single audio track for entire project (not per scene)
+    audioUrl: v.optional(v.string()),
     // Project settings (matching original Arlee AI structure)
     settings: v.optional(
       v.object({

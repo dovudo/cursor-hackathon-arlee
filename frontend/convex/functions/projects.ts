@@ -1,5 +1,6 @@
-import { query, mutation } from "../_generated/server";
+import { query, mutation, action } from "../_generated/server";
 import { v } from "convex/values";
+import { api } from "../_generated/api";
 
 // Helper to get user profile (for queries - read only)
 async function getUserProfile(ctx: any) {
@@ -140,5 +141,50 @@ export const updateProjectSettings = mutation({
   },
 });
 
+export const updateProjectAudio = mutation({
+  args: {
+    projectId: v.id("projects"),
+    audioUrl: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userProfile = await getUserProfile(ctx);
+    const project = await ctx.db.get(args.projectId);
+    
+    if (!project) {
+      throw new Error("Project not found");
+    }
 
+    // Check access
+    if (userProfile && project.userId !== userProfile._id) {
+      throw new Error("Unauthorized");
+    }
 
+    await ctx.db.patch(args.projectId, {
+      audioUrl: args.audioUrl,
+    });
+
+    return { success: true };
+  },
+});
+
+export const updateProjectAudioFromStorage = action({
+  args: {
+    projectId: v.id("projects"),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    // Get URL from storage ID (storage can only be accessed in actions)
+    const url = await ctx.storage.getUrl(args.storageId);
+    if (!url) {
+      throw new Error("Failed to get storage URL");
+    }
+    
+    // Update project with audio URL via mutation
+    await ctx.runMutation(api.functions.projects.updateProjectAudio, {
+      projectId: args.projectId,
+      audioUrl: url,
+    });
+    
+    return { success: true, audioUrl: url };
+  },
+});

@@ -49,7 +49,7 @@ export const generateStoryboard = action({
 
     // Extract settings with defaults
     const settings = project.settings || {};
-    const language = settings.language || "ru";
+    const language = settings.language || "en";
     const pacing = settings.pacing || "moderate";
     const targetDuration = settings.target_duration || 60;
     const minSec = settings.min_sec || 2;
@@ -368,10 +368,28 @@ export const generateStoryboard = action({
           scene.image_prompt ||      // Alternative old format
           "";                         // Fallback
         
+        // Extract script content - try multiple field names
+        const scriptContent = 
+          scene.text ||              // Primary field from AI response
+          scene.scriptContent ||     // Alternative field name
+          scene.narration_text ||    // From script generation format
+          scene.content ||           // Generic content field
+          args.scenarioText ||       // Fallback to full scenario text
+          "";                        // Last resort
+        
+        console.log("[generateStoryboard] Mapping scene", {
+          index,
+          sceneKeys: Object.keys(scene),
+          hasText: !!scene.text,
+          hasScriptContent: !!scene.scriptContent,
+          scriptContentLength: scriptContent.length,
+          imagePromptLength: imagePrompt.length,
+        });
+        
         return {
           orderIndex: index,
           name: scene.title || scene.name || `Scene ${index + 1}`,
-          scriptContent: scene.text || scene.scriptContent || "",
+          scriptContent: scriptContent,
           imagePrompt: imagePrompt,
         };
       }),

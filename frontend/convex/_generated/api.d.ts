@@ -13,6 +13,7 @@ import type * as functions_generationEvents from "../functions/generationEvents.
 import type * as functions_images from "../functions/images.js";
 import type * as functions_projects from "../functions/projects.js";
 import type * as functions_scenes from "../functions/scenes.js";
+import type * as functions_script from "../functions/script.js";
 import type * as functions_seed from "../functions/seed.js";
 import type * as functions_storyboard from "../functions/storyboard.js";
 import type * as functions_styles from "../functions/styles.js";
@@ -30,6 +31,7 @@ declare const fullApi: ApiFromModules<{
   "functions/images": typeof functions_images;
   "functions/projects": typeof functions_projects;
   "functions/scenes": typeof functions_scenes;
+  "functions/script": typeof functions_script;
   "functions/seed": typeof functions_seed;
   "functions/storyboard": typeof functions_storyboard;
   "functions/styles": typeof functions_styles;
