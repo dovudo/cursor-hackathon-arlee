@@ -3,6 +3,9 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import { optimizedIMGLYLoader } from '@/lib/services/optimized-imgly-loader';
 
+// Breathing zoom animation duration (same as main project)
+const BREATHING_ZOOM_DURATION_SEC = 20;
+
 // Type declaration for CreativeEditorSDK
 declare global {
   namespace CreativeEditorSDK {
@@ -66,6 +69,7 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
     });
   }, []);
 
+
   // Add assets to timeline (images and audio)
   const addAssetsToTimeline = useCallback(async (assets: { imageUrl: string; orderIndex: number }[], audioUrl?: string) => {
     if (!editorRef.current || !ready) {
@@ -76,6 +80,36 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
     try {
       console.log('[IMGVideoEditor] Adding assets to timeline', { imageCount: assets.length, hasAudio: !!audioUrl });
       const engine = editorRef.current.engine;
+      
+      // Apply breathing_loop animation as a light continuous zoom (same as main project)
+      // Defined here where engine is available
+      const applyBreathingZoom = async (blockId: any, durationSec: number) => {
+        try {
+          if (!engine.block.supportsAnimation(blockId)) {
+            console.warn('[IMGVideoEditor] Block does not support animations:', blockId);
+            return;
+          }
+
+          // Ensure initial scale is close to normal; amplitude is controlled by the loop animation internally
+          try {
+            engine.block.scale(blockId, 1.0, 0.5, 0.5);
+          } catch {}
+
+          // Create breathing_loop and apply as loop animation
+          const loopAnim = engine.block.createAnimation('breathing_loop');
+          // Stretch the loop across the entire clip to avoid noticeable pulsation
+          engine.block.setDuration(loopAnim, durationSec);
+          try { 
+            engine.block.setEnum(loopAnim, 'animationEasing', 'Linear'); 
+          } catch {}
+          
+          // Assign as loop animation
+          engine.block.setLoopAnimation(blockId, loopAnim);
+          console.log('[IMGVideoEditor] Applied breathing_loop zoom to block', blockId, `(duration: ${durationSec}s)`);
+        } catch (error: any) {
+          console.warn('[IMGVideoEditor] Failed to apply breathing_loop zoom:', error?.message || error);
+        }
+      };
       
       // Get current page
       const pageId = engine.scene.getCurrentPage();
@@ -118,14 +152,23 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
         }
       }
 
+      // Get page dimensions for proper image sizing (Landscape: 1920x1080)
+      const pageWidth = engine.block.getWidth(pageId) || 1920;
+      const pageHeight = engine.block.getHeight(pageId) || 1080;
+      
+      console.log('[IMGVideoEditor] Page dimensions:', { pageWidth, pageHeight, aspectRatio: (pageWidth / pageHeight).toFixed(2) });
+
       // Create track for images
       const trackId = engine.block.create('track');
       engine.block.appendChild(pageId, trackId);
+      // Set track to fill parent page (16:9 landscape)
       engine.block.fillParent(trackId);
-
-      // Get page dimensions for proper image sizing
-      const pageWidth = engine.block.getWidth(pageId) || 1280;
-      const pageHeight = engine.block.getHeight(pageId) || 720;
+      
+      // Ensure track has correct dimensions matching page
+      try {
+        engine.block.setWidth(trackId, pageWidth);
+        engine.block.setHeight(trackId, pageHeight);
+      } catch {}
 
       // Get audio duration if available, otherwise use default
       let audioDuration = 0;
@@ -170,32 +213,36 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
             duration: durationPerImage.toFixed(2)
           });
           
-          // Create graphic block for image
+          // Create graphic block for image (same approach as main project)
           const graphic = engine.block.create('graphic');
           engine.block.setShape(graphic, engine.block.createShape('rect'));
-          engine.block.appendChild(trackId, graphic);
           
-          // Set proper dimensions to match page size
-          engine.block.setWidth(graphic, pageWidth);
-          engine.block.setHeight(graphic, pageHeight);
+          // Append early to ensure block is known in timeline context
+          engine.block.appendChild(trackId, graphic);
           
           // Create image fill
           const imageFill = engine.block.createFill('image');
           engine.block.setString(imageFill, 'fill/image/imageFileURI', asset.imageUrl);
           
-          // Set fill and properties with proper scaling
-          engine.block.setFill(graphic, imageFill);
+          // CRITICAL: Use fillParent BEFORE setFill to ensure proper 16:9 landscape scaling
+          // This ensures graphic fills the track which fills the page (1920x1080)
+          engine.block.fillParent(graphic);
+          
+          // Set content fill mode to 'cover' to maintain aspect ratio
           try {
-            // Use 'cover' mode to maintain aspect ratio and fill the frame
             engine.block.setEnum(graphic, 'contentFill/mode', 'cover');
           } catch {}
           
-          // Ensure graphic fills parent track
-          engine.block.fillParent(graphic);
+          // Set fill after fillParent (same order as main project)
+          engine.block.setFill(graphic, imageFill);
           
           // Set duration and time offset
           engine.block.setDuration(graphic, durationPerImage);
           engine.block.setTimeOffset(graphic, currentTime);
+          
+          // Apply breathing loop zoom effect (same as main project)
+          // Use BREATHING_ZOOM_DURATION_SEC (20s) as in main project, not clip duration
+          await applyBreathingZoom(graphic, BREATHING_ZOOM_DURATION_SEC);
           
           currentTime += durationPerImage;
           console.log('[IMGVideoEditor] Image clip added successfully', { 
@@ -403,15 +450,17 @@ export const IMGVideoEditor = React.forwardRef<any, IMGVideoEditorProps>(({
           console.warn('Asset sources warning:', error);
         }
 
-        // Create video scene
+        // Create video scene with Landscape resolution (1920x1080 Full HD)
         try {
           const sceneId = await instance.createVideoScene();
           if (sceneId) {
             const engine = instance.engine;
             const pageId = engine.scene.getCurrentPage();
             if (pageId) {
-              engine.block.setWidth(pageId, 1280);
-              engine.block.setHeight(pageId, 720);
+              // Landscape resolution: 1920x1080 (Full HD)
+              engine.block.setWidth(pageId, 1920);
+              engine.block.setHeight(pageId, 1080);
+              console.log('[IMGVideoEditor] Video scene created with Landscape resolution: 1920x1080');
             }
           }
         } catch (error) {
